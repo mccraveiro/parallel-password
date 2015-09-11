@@ -2,3 +2,4 @@ brute_force
 gen_hash
 parallel
 *.o
+.DS_Store
