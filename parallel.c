@@ -4,55 +4,57 @@
 #include <stdlib.h>
 #include <time.h>
 #include <pthread.h>
-
-#if defined(__linux__)
 #include <crypt.h>
-#endif
 
 #define HASH_SIZE 256
 #define NTHREADS 5
 
 typedef struct {
-    int id;
-    char *target_hash;
-    char *password;
-    int ntries;
+  char *target_hash;
+  char *password;
+  int ntries;
 } thread_data;
 
 /*
- * @brief number of chars used on password
- */
+* @brief number of chars used on password
+*/
 int passwordLength = 0;
 
+/*
+* @brief list of threads
+*/
 pthread_t thread[NTHREADS];
 
 /*
- * @brief Generate a Hash from a password string
- * @param password password string
- * @param hash generated Hash
- */
-char *generate_password_hash(const char *password) {
-    struct crypt_data data;
-	data.initialized = 0;
+* @brief success flag
+*/
+int success = 0;
 
-    return crypt_r(password, "aa", &data);
+/*
+* @brief Generate a Hash from a password string
+* @param password password string
+* @param cdata crypt_data struct
+* @return generated Hash
+*/
+char *generate_password_hash(const char *password, struct crypt_data *cdata) {
+  return crypt_r(password, "aa", cdata);
 }
 
 /*
- * @brief Set 'password' to the next value to be tested
- * @param password password string
- * @return -1 if there are no more possible values
- */
+* @brief Set 'password' to the next value to be tested
+* @param password password string
+* @return 0 if there are no more possible values
+*/
 int get_next_password(char *password) {
   // Increment password chars from right to left Ex.: 0000, 0001, 0002 ... 0010...
-	int index = passwordLength - 1;
+  int index = passwordLength - 1;
 
-	while (index >= 0) {
+  while (index >= 0) {
     // just increase last digit
-		if (password[index] != '9') {
-			password[index]++;
-			break;
-		}
+    if (password[index] != '9') {
+      password[index]++;
+      break;
+    }
 
     // no more possible passwords
     if (index == 0) {
@@ -61,132 +63,130 @@ int get_next_password(char *password) {
 
     // carry 1 to next digit
     password[index] = '0';
-		index--;
-	}
+    index--;
+  }
 
-	return 1;
+  return 1;
 }
 
 /*
- * @brief compare password with target_hash
- * @param target_hash string
- * @param password string
- * @return 1 if equal, otherwise 0.
- */
-int compare_password(const char *target_hash, const char *password) {
-	// char generatedHash[HASH_SIZE + 1];
-	// strcpy(generatedHash, generate_password_hash(password));
-
-	// compare generated hash with target hash
-	if (strcmp(target_hash, generate_password_hash(password)) == 0) {
-		return 1;
-	}
-
-	return 0;
+* @brief compare password with target_hash
+* @param target_hash string
+* @param password string
+* @param cdata crypt_data struct
+* @return 1 if equal, otherwise 0.
+*/
+int compare_password(const char *target_hash, const char *password, struct crypt_data *cdata) {
+  // compare generated hash with target hash
+  if (strcmp(target_hash, generate_password_hash(password, cdata)) == 0) {
+    return 1;
+  }
+  return 0;
 }
 
-void *compare_password_pthread(void *data_ptr) {
-    int i, j;
-    thread_data *data = (thread_data *)data_ptr;
+/*
+* @brief converts integers to strings with leading zeros
+* @param n integer to be converted
+* @param digits how many digits should have the result string
+* @param str result string
+*/
+void *intToString(int n, int digits, char *str) {
+  int i;
+  str[digits] = '\0';
 
-    for (i = 0; i < data->ntries; i++) {
-        // printf("%s\n", data->password);
+  for(i = digits-1; i >= 0; i--) {
+    str[i] = (n % 10) + '0';
+    n = n/10;
+  }
 
-        if (compare_password(data->target_hash, data->password)) {
-            printf("%s - %s\n", data->target_hash, data->password);
-
-            /*for (j = 0; j < NTHREADS; j++) {
-                if (j != data->id) {
-                    pthread_cancel(thread[j]);
-                }
-            }*/
-
-            break;
-        }
-
-        if (!get_next_password(data->password)) {
-            break;
-        }
-    }
-
-    return NULL;
-}
-
-char *intToString(int n, int digits, char *str) {
-    int i;
-
-    str[digits] = '\0';
-
-    for(i = digits-1; i >= 0; i--) {
-        str[i] = (n % 10) + '0';
-        n = n/10;
-    }
-
-    return str;
+  return str;
 }
 
 int power(int base, int exp) {
-    int i;
-    int result = 1;
+  int i;
+  int result = 1;
 
-    for (i = 0; i < exp; i++) {
-        result = result * base;
+  for (i = 0; i < exp; i++) {
+    result = result * base;
+  }
+
+  return result;
+}
+
+/*
+* @brief main thread code
+* @param data_ptr struct containing all data used by the thread
+*/
+void *compare_password_pthread(void *data_ptr) {
+  thread_data *data = (thread_data *)data_ptr;
+  int i;
+
+  // initialize crypt data used by thread
+  struct crypt_data cdata;
+  cdata.initialized = 0;
+
+  for (i = 0; i < data->ntries && !success; i++) {
+    // printf("%s\n", data->password);
+
+    if (compare_password(data->target_hash, data->password, &cdata)) {
+      // password found!
+      success = 1;
+      printf("%s - %s\n", data->target_hash, data->password);
+      return NULL;
     }
 
-    return result;
+    // no more possible passwords
+    if (!get_next_password(data->password)) {
+      return NULL;
+    }
+  }
+
+  return NULL;
 }
 
 int main(int argc, char *argv[]) {
-    // time spent running the program
-	clock_t start = 0;
-	clock_t finish = 0;
+  // time spent running the program
+  clock_t start = 0;
+  clock_t finish = 0;
 
-    thread_data *data[NTHREADS];
+  thread_data *data[NTHREADS];
 
-    int i, ntries;
+  int i, ntries;
 
-    // ensure the program got the right arguments
-	if (argc < 3) {
-		printf("Usage: %s <password length> <target hash>", argv[0]);
-		return 1;
-	}
+  // ensure the program got the right arguments
+  if (argc < 3) {
+    printf("Usage: %s <password length> <target hash>", argv[0]);
+    return 1;
+  }
 
-	passwordLength = atoi(argv[1]);
-    ntries = power(10, passwordLength)/NTHREADS;
+  passwordLength = atoi(argv[1]);
+  // split tasks equaly per threads
+  ntries = power(10, passwordLength)/NTHREADS;
 
-    for (i = 0; i < NTHREADS; i++) {
-        data[i] = malloc(sizeof(thread_data));
-        data[i]->id = i;
-        data[i]->target_hash = strdup(argv[2]);
-        data[i]->password = malloc(sizeof(char) * (passwordLength + 1));
-        data[i]->ntries = ntries;
+  for (i = 0; i < NTHREADS; i++) {
+    data[i] = malloc(sizeof(thread_data));
+    data[i]->target_hash = strdup(argv[2]);
+    data[i]->password = malloc(sizeof(char) * (passwordLength + 1));
+    data[i]->ntries = ntries;
 
-        // set initial password to '0' chars
-      	memset(data[i]->password, '0', passwordLength);
+    // set initial password to i * ntries with leading zeros
+    intToString(i * ntries, passwordLength, data[i]->password);
+  }
 
-        strcpy(data[i]->password, intToString(i * ntries, passwordLength, data[i]->password));
-        /*data[i]->password[passwordLength] = '\0';
+  // start timer
+  start = clock();
 
-        // TODO: split passwords between threads
-        if (i == 1) {
-            data[i]->password[0] = '5';
-        }*/
-    }
+  for (i = 0; i < NTHREADS; i++) {
+    pthread_create(&thread[i], NULL, compare_password_pthread, data[i]);
+  }
 
-	// start timer
-	start = clock();
+  for (i = 0; i < NTHREADS; i++) {
+    pthread_join(thread[i], NULL);
+  }
 
-    for (i = 0; i < NTHREADS; i++) {
-        pthread_create(&thread[i], NULL, compare_password_pthread, data[i]);
-    }
+  // stop timer and print result
+  finish = clock();
+  printf("%f\n", (float)(finish - start) / CLOCKS_PER_SEC);
 
-    for (i = 0; i < NTHREADS; i++) {
-        pthread_join(thread[i], NULL);
-    }
-
-	// stop timer and print result
-	finish = clock();
-	printf("%f\n", (float)(finish - start) / CLOCKS_PER_SEC);
-
-	return 0;
+  return 0;
 }
