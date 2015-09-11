@@ -1,9 +1,9 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <time.h>
+#include <crypt.h>
 
 #define TAM_HASH 256
 
@@ -136,9 +136,9 @@ int IncrementaSenha(char *senha)
 }
 
 void CalculaHashSenha(const char *senha, char *hash) {
-	// struct crypt_data data;
-	// data.initialized = 0;
+	struct crypt_data data;
+	data.initialized = 0;
 
 	//pega a hash gerada a partir da string de senha atual
-	strcpy(hash, crypt(senha, "aa"));
+	strcpy(hash, crypt_r(senha, "aa", &data));
 }
