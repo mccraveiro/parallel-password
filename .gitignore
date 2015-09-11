@@ -1,0 +1,4 @@
+brute_force
+gen_hash
+parallel
+*.o
