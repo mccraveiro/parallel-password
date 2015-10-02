@@ -6,7 +6,7 @@ gen_hash: gen_hash.o
 	$(CC) -o gen_hash gen_hash.c -lcrypto
 
 parallel: parallel.o
-	$(CC) -o parallel parallel.c -lcrypto -g -Wall -fopenmp
+	$(CC) -o parallel parallel.c -lcrypto -g -Wall -fopenmp -lm
 
 clean:
 	$(RM) *.o gen_hash parallel

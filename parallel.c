@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <time.h>
 #include <omp.h>
 #if defined(__APPLE__)
@@ -15,6 +16,7 @@
 
 int passwordLength = 0;
 int success = 0;
+char *target_hash;
 
 char *target_hash;
 
@@ -25,7 +27,7 @@ char *target_hash;
 */
 char *digest_to_string(unsigned char* buffer) {
 	int i;
-	char* buf_str = (char*) malloc ((MD5_DIGEST_LENGTH + 1) * sizeof(char));
+	char* buf_str = (char*) malloc ((MD5_DIGEST_LENGTH * 2 + 1) * sizeof(char));
 	char* buf_ptr = buf_str;
 
 	for (i = 0; i < MD5_DIGEST_LENGTH; i++) {
@@ -58,8 +60,13 @@ int get_next_password(char *password) {
 
   while (index >= 0) {
     // just increase last digit
-    if (password[index] != '9') {
+    if (password[index] != '9' && password[index] != 'z') {
       password[index]++;
+      // printf("%s\n", password);
+      break;
+    } else if (password[index] == '9') {
+      password[index] = 'a';
+      // printf("%s\n", password);
       break;
     }
 
@@ -95,31 +102,52 @@ int compare_password(const char *target_hash, const char *password) {
 }
 
 /*
-* @brief converts integers to strings with leading zeros
-* @param n integer to be converted
-* @param digits how many digits should have the result string
-* @param str result string
+* @brief set initial password
 */
-void *intToString(int n, int digits, char *str) {
-  int i;
-  str[digits] = '\0';
-
-  for(i = digits-1; i >= 0; i--) {
-    str[i] = (n % 10) + '0';
-    n = n/10;
+void init_password(char c, int len, char *str) {
+  for(int i = 1; i < len; i++) {
+    str[i] = '0';
   }
 
-  return str;
+  str[0] = c;
+  str[len] = '\0';
 }
 
-int power(int base, int exp) {
-  int i;
-  int result = 1;
-
-  for (i = 0; i < exp; i++) {
-    result = result * base;
+/*
+* @brief Take a integer 0-36 and convert to 0-9a-z
+*/
+char int_to_char(int n) {
+  if (n < 10) {
+    n += 48;
+  } else {
+    n += 87;
   }
 
+  return n;
+}
+
+/*
+* @brief split chars 0-9 and a-z between n threads
+*/
+char *balance_work(int thread_num, int thread_count) {
+  int m = 36;
+  int n = thread_count;
+  int p = floor(m / n);
+  int r = m % n;
+  int x, y, f;
+
+  if (n - thread_num <= r) {
+    f = n - r;
+    x = thread_num * (p + 1) - f;
+    y = (thread_num + 1) * (p + 1) - f;
+  } else {
+    x = thread_num * p;
+    y = (thread_num + 1) * p;
+  }
+
+  char *result = malloc(2 * sizeof(char));
+  result[0] = int_to_char(x);
+  result[1] = int_to_char(y);
   return result;
 }
 
@@ -127,19 +155,21 @@ int power(int base, int exp) {
 * @brief main thread code
 */
 void break_password() {
-  int i;
   int thread_num = omp_get_thread_num();
   int thread_count = omp_get_num_threads();
   char *password = malloc(sizeof(char) * (passwordLength + 1));
 
-  printf("STARTING %d of %d\n", thread_num, thread_count);
   // split tasks equaly per threads
-  int ntries = power(10, passwordLength) / thread_count;
+  char *workload = balance_work(thread_num, thread_count);
+  char first_char = workload[0];
+  char last_char = workload[1];
 
-  // set initial password to i * ntries with leading zeros
-  intToString(thread_num * ntries, passwordLength, password);
+  // printf("STARTING %d of %d - Going from %c to %c\n", thread_num, thread_count, first_char, last_char);
 
-  for (i = 0; i < ntries && !success; i++) {
+  // set initial password to first_char with leading zeros
+  init_password(first_char, passwordLength, password);
+
+  while (!success) {
     if (compare_password(target_hash, password)) {
       // password found!
       #pragma omp critical
@@ -153,10 +183,14 @@ void break_password() {
     if (!get_next_password(password)) {
       break;
     }
+
+    if (password[0] == last_char) {
+      break;
+    }
   }
 
   free(password);
-  printf("DONE %d - on try #%d\n", thread_num, i);
+  // printf("DONE %d - on try #%ld\n", thread_num, i);
 }
 
 int main(int argc, char *argv[]) {
