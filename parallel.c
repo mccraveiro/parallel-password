@@ -1,3 +1,16 @@
+/***************************************************/
+/*                                                 */
+/*  Breaking MD5 Hashes using threads              */
+/*                                                 */
+/*  Authors:                                       */
+/*    Mateus Craveiro                              */
+/*    Thiago Wittmann                              */
+/*                                                 */
+/*  Usage:                                         */
+/*	  ./parallel <password length> <target hash>   */
+/*                                                 */
+/***************************************************/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,12 +25,10 @@
 #  include <openssl/md5.h>
 #endif
 
-#define NTHREADS 10
+#define NTHREADS 4
 
 int passwordLength = 0;
 int success = 0;
-char *target_hash;
-
 char *target_hash;
 
 /*
@@ -105,7 +116,9 @@ int compare_password(const char *target_hash, const char *password) {
 * @brief set initial password
 */
 void init_password(char c, int len, char *str) {
-  for(int i = 1; i < len; i++) {
+	int i;
+
+  for(i = 1; i < len; i++) {
     str[i] = '0';
   }
 
