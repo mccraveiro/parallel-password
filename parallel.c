@@ -1,12 +1,16 @@
-#define _GNU_SOURCE
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
-#include <pthread.h>
-#include <crypt.h>
+#include <omp.h>
+#if defined(__APPLE__)
+#  define COMMON_DIGEST_FOR_OPENSSL
+#  include <CommonCrypto/CommonDigest.h>
+#  define MD5 CC_MD5
+#else
+#  include <openssl/md5.h>
+#endif
 
-#define HASH_SIZE 256
 #define NTHREADS 5
 
 typedef struct {
@@ -21,23 +25,37 @@ typedef struct {
 int passwordLength = 0;
 
 /*
-* @brief list of threads
-*/
-pthread_t thread[NTHREADS];
-
-/*
 * @brief success flag
 */
 int success = 0;
 
 /*
+* @brief Generate a string from a md5 digest
+* @param buffer md5 digest
+* @return hash string
+*/
+char *digest_to_string(unsigned char* buffer) {
+	int i;
+	char* buf_str = (char*) malloc (MD5_DIGEST_LENGTH * sizeof(char));
+	char* buf_ptr = buf_str;
+
+	for (i = 0; i < MD5_DIGEST_LENGTH; i++) {
+	  buf_ptr += sprintf(buf_ptr, "%02x", buffer[i]);
+	}
+	*(buf_ptr + 1) = '\0';
+
+	return buf_str;
+}
+
+/*
 * @brief Generate a Hash from a password string
 * @param password password string
-* @param cdata crypt_data struct
 * @return generated Hash
 */
-char *generate_password_hash(const char *password, struct crypt_data *cdata) {
-  return crypt_r(password, "aa", cdata);
+char *generate_password_hash(const char *password) {
+  unsigned char result[MD5_DIGEST_LENGTH];
+  MD5(password, strlen(password), result);
+  return digest_to_string(result);
 }
 
 /*
@@ -73,14 +91,14 @@ int get_next_password(char *password) {
 * @brief compare password with target_hash
 * @param target_hash string
 * @param password string
-* @param cdata crypt_data struct
 * @return 1 if equal, otherwise 0.
 */
-int compare_password(const char *target_hash, const char *password, struct crypt_data *cdata) {
+int compare_password(const char *target_hash, const char *password) {
   // compare generated hash with target hash
-  if (strcmp(target_hash, generate_password_hash(password, cdata)) == 0) {
+  if (strcmp(target_hash, generate_password_hash(password)) == 0) {
     return 1;
   }
+
   return 0;
 }
 
@@ -121,14 +139,10 @@ void *compare_password_pthread(void *data_ptr) {
   thread_data *data = (thread_data *)data_ptr;
   int i;
 
-  // initialize crypt data used by thread
-  struct crypt_data cdata;
-  cdata.initialized = 0;
-
   for (i = 0; i < data->ntries && !success; i++) {
     // printf("%s\n", data->password);
 
-    if (compare_password(data->target_hash, data->password, &cdata)) {
+    if (compare_password(data->target_hash, data->password)) {
       // password found!
       success = 1;
       printf("%s - %s\n", data->target_hash, data->password);
@@ -176,13 +190,8 @@ int main(int argc, char *argv[]) {
   // start timer
   start = clock();
 
-  for (i = 0; i < NTHREADS; i++) {
-    pthread_create(&thread[i], NULL, compare_password_pthread, data[i]);
-  }
-
-  for (i = 0; i < NTHREADS; i++) {
-    pthread_join(thread[i], NULL);
-  }
+  #pragma omp parallel num_threads(NTHREADS)
+  compare_password_pthread(data[omp_get_thread_num()]);
 
   // stop timer and print result
   finish = clock();
