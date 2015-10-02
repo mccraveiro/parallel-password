@@ -25,7 +25,7 @@ char *target_hash;
 */
 char *digest_to_string(unsigned char* buffer) {
 	int i;
-	char* buf_str = (char*) malloc ((MD5_DIGEST_LENGTH + 1) * sizeof(char));
+	char* buf_str = (char*) malloc ((MD5_DIGEST_LENGTH * 2 + 1) * sizeof(char));
 	char* buf_ptr = buf_str;
 
 	for (i = 0; i < MD5_DIGEST_LENGTH; i++) {
