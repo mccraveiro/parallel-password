@@ -11,23 +11,12 @@
 #  include <openssl/md5.h>
 #endif
 
-#define NTHREADS 5
+#define NTHREADS 1
 
-typedef struct {
-  char *target_hash;
-  char *password;
-  int ntries;
-} thread_data;
-
-/*
-* @brief number of chars used on password
-*/
 int passwordLength = 0;
-
-/*
-* @brief success flag
-*/
 int success = 0;
+
+char *target_hash;
 
 /*
 * @brief Generate a string from a md5 digest
@@ -36,7 +25,7 @@ int success = 0;
 */
 char *digest_to_string(unsigned char* buffer) {
 	int i;
-	char* buf_str = (char*) malloc (MD5_DIGEST_LENGTH * sizeof(char));
+	char* buf_str = (char*) malloc ((MD5_DIGEST_LENGTH + 1) * sizeof(char));
 	char* buf_ptr = buf_str;
 
 	for (i = 0; i < MD5_DIGEST_LENGTH; i++) {
@@ -69,8 +58,13 @@ int get_next_password(char *password) {
 
   while (index >= 0) {
     // just increase last digit
-    if (password[index] != '9') {
+    if (password[index] != '9' && password[index] != 'z') {
       password[index]++;
+      printf("%s\n", password);
+      break;
+    } else if (password[index] == '9') {
+      password[index] = 'a';
+      printf("%s\n", password);
       break;
     }
 
@@ -94,12 +88,15 @@ int get_next_password(char *password) {
 * @return 1 if equal, otherwise 0.
 */
 int compare_password(const char *target_hash, const char *password) {
+  int result = 0;
+  char *hash = generate_password_hash(password);
   // compare generated hash with target hash
-  if (strcmp(target_hash, generate_password_hash(password)) == 0) {
-    return 1;
+  if (strcmp(target_hash, hash) == 0) {
+    result = 1;
   }
 
-  return 0;
+  //free(hash);
+  return result;
 }
 
 /*
@@ -108,7 +105,7 @@ int compare_password(const char *target_hash, const char *password) {
 * @param digits how many digits should have the result string
 * @param str result string
 */
-void *intToString(int n, int digits, char *str) {
+void *intToString(long long int n, int digits, char *str) {
   int i;
   str[digits] = '\0';
 
@@ -120,9 +117,9 @@ void *intToString(int n, int digits, char *str) {
   return str;
 }
 
-int power(int base, int exp) {
-  int i;
-  int result = 1;
+long long int power(int base, int exp) {
+  long long int i;
+  long long int result = 1;
 
   for (i = 0; i < exp; i++) {
     result = result * base;
@@ -133,39 +130,44 @@ int power(int base, int exp) {
 
 /*
 * @brief main thread code
-* @param data_ptr struct containing all data used by the thread
 */
-void *compare_password_pthread(void *data_ptr) {
-  thread_data *data = (thread_data *)data_ptr;
-  int i;
+void break_password() {
+  long long int i;
+  int thread_num = omp_get_thread_num();
+  int thread_count = omp_get_num_threads();
+  char *password = malloc(sizeof(char) * (passwordLength + 1));
 
-  for (i = 0; i < data->ntries && !success; i++) {
-    // printf("%s\n", data->password);
+  printf("STARTING %d of %d\n", thread_num, thread_count);
+  // split tasks equaly per threads
+  long long int ntries = power(36, passwordLength) / thread_count;
 
-    if (compare_password(data->target_hash, data->password)) {
+  // set initial password to i * ntries with leading zeros
+  intToString(thread_num * ntries, passwordLength, password);
+
+  for (i = 0; i < ntries && !success; i++) {
+    if (compare_password(target_hash, password)) {
       // password found!
+      #pragma omp critical
       success = 1;
-      printf("%s - %s\n", data->target_hash, data->password);
-      return NULL;
+
+      printf("%s - %s\n", target_hash, password);
+      break;
     }
 
     // no more possible passwords
-    if (!get_next_password(data->password)) {
-      return NULL;
+    if (!get_next_password(password)) {
+      break;
     }
   }
 
-  return NULL;
+  free(password);
+  printf("DONE %d - on try #%lld\n", thread_num, i);
 }
 
 int main(int argc, char *argv[]) {
   // time spent running the program
   clock_t start = 0;
   clock_t finish = 0;
-
-  thread_data *data[NTHREADS];
-
-  int i, ntries;
 
   // ensure the program got the right arguments
   if (argc < 3) {
@@ -174,24 +176,13 @@ int main(int argc, char *argv[]) {
   }
 
   passwordLength = atoi(argv[1]);
-  // split tasks equaly per threads
-  ntries = power(10, passwordLength)/NTHREADS;
-
-  for (i = 0; i < NTHREADS; i++) {
-    data[i] = malloc(sizeof(thread_data));
-    data[i]->target_hash = strdup(argv[2]);
-    data[i]->password = malloc(sizeof(char) * (passwordLength + 1));
-    data[i]->ntries = ntries;
-
-    // set initial password to i * ntries with leading zeros
-    intToString(i * ntries, passwordLength, data[i]->password);
-  }
+  target_hash = strdup(argv[2]);
 
   // start timer
   start = clock();
 
-  #pragma omp parallel num_threads(NTHREADS)
-  compare_password_pthread(data[omp_get_thread_num()]);
+  #pragma omp parallel num_threads(NTHREADS) shared(success, target_hash, passwordLength)
+  break_password();
 
   // stop timer and print result
   finish = clock();
