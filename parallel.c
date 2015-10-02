@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <time.h>
 #include <omp.h>
 #if defined(__APPLE__)
@@ -11,7 +12,7 @@
 #  include <openssl/md5.h>
 #endif
 
-#define NTHREADS 1
+#define NTHREADS 5
 
 int passwordLength = 0;
 int success = 0;
@@ -118,6 +119,28 @@ char int_to_char(int n) {
   return n;
 }
 
+char *balance_work(int thread_num, int thread_count) {
+  int m = 37;
+  int n = thread_count;
+  int p = floor(m / n);
+  int r = m % n;
+  int x, y, f;
+
+  if (n - thread_num <= r) {
+    f = n - r;
+    x = thread_num * (p + 1) - f;
+    y = (thread_num + 1) * (p + 1) - f;
+  } else {
+    x = thread_num * p;
+    y = (thread_num + 1) * p;
+  }
+
+  char *result = malloc(2 * sizeof(char));
+  result[0] = int_to_char(x);
+  result[1] = int_to_char(y);
+  return result;
+}
+
 /*
 * @brief main thread code
 */
@@ -126,11 +149,13 @@ void break_password() {
   int thread_num = omp_get_thread_num();
   int thread_count = omp_get_num_threads();
   char *password = malloc(sizeof(char) * (passwordLength + 1));
-  // split tasks equaly per threads
-  char first_char = int_to_char(0);
-  char last_char = int_to_char(36);
 
-  printf("STARTING %d of %d\n", thread_num, thread_count);
+  // split tasks equaly per threads
+  char *workload = balance_work(thread_num, thread_count);
+  char first_char = workload[0];
+  char last_char = workload[1];
+
+  printf("STARTING %d of %d - Going from %c to %c\n", thread_num, thread_count, first_char, last_char);
 
   // set initial password to first_char with leading zeros
   init_password(first_char, passwordLength, password);
@@ -147,6 +172,10 @@ void break_password() {
 
     // no more possible passwords
     if (!get_next_password(password)) {
+      break;
+    }
+
+    if (password[0] == last_char) {
       break;
     }
 
